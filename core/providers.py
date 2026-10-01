@@ -47,7 +47,9 @@ _OPENCODE_HEADERS = {
 # /v1/models 还混着走 /messages、/responses 的模型，那些用 chat/completions 会失败
 _OPENCODE_CHAT = ("deepseek-", "glm-", "kimi-", "mimo-", "longcat-", "hy", "space-bunny-")
 _opencode_chat = lambda model_id: model_id.startswith(_OPENCODE_CHAT)  # noqa: E731
-DRAFT_PROVIDERS = {  # 第一个就是默认：DeepSeek 官网直连
+DRAFT_PROVIDERS = {  # 第一个就是默认：本地 Ollama（随程序内置，qwen2.5:7b）
+    "ollama": _Draft("本地 Ollama（随程序内置）", "openai", "http://127.0.0.1:11434/v1",
+                     "qwen2.5:7b", _NONE),
     "deepseek": _Draft("DeepSeek 官网", "openai", "https://api.deepseek.com", "deepseek-flash",
                        lambda on: {"thinking": {"type": "enabled" if on else "disabled"}}),
     "openrouter": _Draft("OpenRouter", "openai", OPENROUTER_BASE,
@@ -74,13 +76,35 @@ THINKING = ("DeepSeek", "OpenRouter", "Anthropic", "Gemini")
 ENV_VARS = sorted({JEV_ENV, LLM_ENV, *LEGACY.values()})
 
 
+def draft_base(provider: str, configured: str | None = None) -> str | None:
+    """某个起草来源实际要打的 base_url。
+
+    只有「本地 Ollama」特殊：随包 serve 可能没抢到默认端口 11434（用户自己装了 Ollama
+    又没带 qwen2.5:7b 时），真实端口由 core.runtime_local 决定；其余来源照表走。
+    延迟 import runtime_local，避免这个纯数据模块在启动时把运行时逻辑拖起来。
+    """
+    if provider == "ollama":
+        try:  # 当模块导入 / 当脚本直接跑 都能用
+            from . import runtime_local
+        except ImportError:
+            import runtime_local
+
+        return runtime_local.ollama_v1_base()
+    return configured or DRAFT_PROVIDERS[provider].base
+
+
 if __name__ == "__main__":
     # ponytail: 纯数据，只查几条不变式——协议打错字、自定义来源漏配 Base URL、思考字段写反最容易出。
     assert {p.protocol for p in DRAFT_PROVIDERS.values()} == {"openai", "anthropic", "gemini"}
     assert all(p.base or key in CUSTOM or p.protocol == "gemini"
                for key, p in DRAFT_PROVIDERS.items())
     assert all(not DRAFT_PROVIDERS[key].base for key in CUSTOM)
-    assert next(iter(DRAFT_PROVIDERS)) == "deepseek"  # 默认就是列表第一个
+    assert next(iter(DRAFT_PROVIDERS)) == "ollama"  # 默认就是列表第一个：本地 Ollama
+    assert DRAFT_PROVIDERS["ollama"].protocol == "openai"
+    assert DRAFT_PROVIDERS["ollama"].default == "qwen2.5:7b"
+    assert draft_base("ollama") == "http://127.0.0.1:11434/v1"  # 没起运行时 = 默认端口
+    assert draft_base("deepseek", None) == "https://api.deepseek.com"
+    assert draft_base("custom_openai", "http://x") == "http://x"
     assert DRAFT_PROVIDERS["deepseek"].extra(True) == {"thinking": {"type": "enabled"}}
     assert DRAFT_PROVIDERS["deepseek"].extra(False) == {"thinking": {"type": "disabled"}}
     assert DRAFT_PROVIDERS["openrouter"].extra(True) == {"reasoning": {"enabled": True}}

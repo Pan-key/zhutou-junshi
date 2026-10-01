@@ -118,13 +118,14 @@ def main() -> int:
                      "draft_provider": "deepseek", "draft_model": "deepseek-flash",
                      "draft_base_url": "", "reply_target": True,
                      "style": "话少，基本不用标点，急了才发感叹号", "thinking": False,
-                     "check_update": True, "debug_view": args.state == "debug"}
+                     "junshi": True,
+                     "debug_view": args.state == "debug"}
 
     def save_demo_settings(relationship_text=None, context_n=None, *, jev_provider_text=None,
                            jev_key_text=None, jev_model_text=None, draft_provider_text=None,
                            llm_key_text=None, draft_model_text=None, draft_base_url_text=None,
                            reply_target_on=None, style_text=None, thinking_on=None,
-                           check_update_on=None, debug_view_on=None):
+                           junshi_on=None, debug_view_on=None):
         if relationship_text:
             demo_settings["relationship"] = relationship_text
         if context_n is not None:
@@ -138,7 +139,7 @@ def main() -> int:
             if key:
                 demo_settings[name] = key
         for name, value in (("reply_target", reply_target_on), ("thinking", thinking_on),
-                            ("check_update", check_update_on), ("debug_view", debug_view_on)):
+                            ("junshi", junshi_on), ("debug_view", debug_view_on)):
             if value is not None:
                 demo_settings[name] = bool(value)
 
@@ -171,7 +172,7 @@ def main() -> int:
         reply_target=lambda: demo_settings["reply_target"],
         style=lambda: demo_settings["style"],
         thinking=lambda: demo_settings["thinking"],
-        check_update=lambda: demo_settings["check_update"],
+        junshi=lambda: demo_settings["junshi"],
         debug_view=lambda: demo_settings["debug_view"],
         save=save_demo_settings,
     ):
@@ -209,7 +210,6 @@ def main() -> int:
             ov.set_chat(_CHAT)
             ov.show(_RESULT)
             ov.set_status("演示模式：已生成 3 条建议，点击填入仅模拟操作。", kind="success")
-            ov.set_update("9.9.9", "https://github.com/jev-chat/jev-chat-windows/releases/latest")
             if args.state == "loading":
                 ov.set_busy(True)
                 ov.set_status("演示模式：正在为最新消息生成建议…", kind="busy")

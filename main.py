@@ -13,11 +13,11 @@ import threading
 import traceback
 from collections import deque
 
-from app import settings, update, worker
+from app import settings, worker
 from app.capture import find_chat_hwnd
 from app.fill import fill
 from app.overlay import Overlay
-from app.version import VERSION
+from core import runtime_local
 from core.engine import analyze
 from app.i18n import T
 
@@ -28,7 +28,7 @@ from app.i18n import T
 chats = {}
 state = {"area": None, "busy": False, "rerun": None, "hwnd": None, "chat": ""}
 results = queue.Queue()
-update_result = queue.Queue()  # 独立小队列，别跟 results 的 (kind, r, title, revision) 形状搅在一起
+boot_q = queue.Queue()  # 启动引导（内置 Ollama 拉起/就绪）的状态回报，形状 (kind, text, status)
 
 
 def chat_of(title):
@@ -128,11 +128,16 @@ def analyze_bg(msgs, title, revision, reply_to=None):
         results.put(("err", f"{T('分析失败: ')}{e}", title, revision))
 
 
-def check_update_bg():
-    """启动时后台查一次新版本，跟 analyze_bg 一个套路：网络调用在线程里，UI 只在 tick() 里动。"""
-    r = update.check_latest(VERSION)
-    if r:
-        update_result.put(r)
+def boot_bg():
+    """启动时把本地模型引擎拉起来：内置 Ollama serve 就绪、或复用系统里现成的。
+    结果走 boot_q 回报，UI 只在 tick() 里动。失败不打断主流程——用户仍可改用云端来源。"""
+    try:
+        if runtime_local.ensure_ollama():
+            boot_q.put(("boot", "本地模型引擎已就绪，可离线生成回复", "ok"))
+        else:
+            boot_q.put(("boot", "未检测到随包模型引擎；请在设置中改用云端模型，或检查程序目录是否完整", "warning"))
+    except Exception as e:
+        boot_q.put(("boot", f"本地模型引擎启动失败: {e}", "error"))
 
 
 def start_analyze(title, msgs):
@@ -238,9 +243,10 @@ def drain():
 def tick():
     try:
         drain()
-        while not update_result.empty():
-            latest, url = update_result.get()
-            ov.set_update(latest, url)
+        while not boot_q.empty():
+            _, text, kind = boot_q.get()
+            ov.set_status(text, kind)
+            ov.log(text)
         while not results.empty():
             kind, r, title, revision = results.get()
             state["busy"] = False
@@ -290,11 +296,11 @@ if __name__ == "__main__":  # Windows 的 spawn 会让子进程重新执行本�
     if not settings.has_jev_key():
         ov.set_status("请先在设置中配置模型", "warning")
         ov.after(0, ov.open_settings)
-    if settings.check_update() and update.parse_version(VERSION):  # 开发版没有版本号，不查也不烦源码用户
-        threading.Thread(target=check_update_bg, daemon=True).start()
+    threading.Thread(target=boot_bg, daemon=True).start()  # 拉起/探测内置本地模型引擎，不阻塞界面
     ov.after(50, tick)
     try:
         ov.run()
     finally:
+        runtime_local.shutdown()  # 只收我们自己拉起的 serve；用户自己的 Ollama 不碰
         if child is not None:
             child.terminate()

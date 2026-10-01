@@ -1,16 +1,48 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""猪头军师打包定义：全本地版（Laya 判断 + OpenAI 兼容起草端点）。"""
+"""猪头军师打包定义：全本地版（Laya 判断 + 内置 Ollama 起草）。
+
+onedir 发布包 = 程序 + runtime/（Ollama 运行时）+ models/（qwen2.5:7b + Laya 快照）。
+runtime/ 与 models/ 由 tools/make_package.py 生成（几 GB，已 .gitignore），
+不在时打包照常进行（产出的是不带头模型的壳，方便先验 UI）。
+"""
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 NAME = "猪头军师"
+_SPEC_ROOT = os.path.abspath(".")
+
+
+def _treedir(datas, rel: str):
+    """把项目里的目录整棵收进包（不存在就跳过，方便先打壳再补模型）。
+
+    datas 元组是 (source, target_dir)：source 必须传「目录」，PyInstaller 会递归
+    展开并保留相对结构（runtime/ → _internal/runtime/…）；如果传单个文件，目标
+    路径后会被再拼一层文件名，路径就叠了。
+    """
+    src = os.path.join(_SPEC_ROOT, rel)
+    if os.path.isdir(src):
+        datas.append((src, rel))
+    return datas
+
 
 hiddenimports = [
     "app.worker", "app.capture", "app.ocr", "app.fill", "app.overlay", "app.settings",
-    "app.version", "app.update", "app.debugwin",
+    "app.version", "app.debugwin",
     "core.engine", "core.draft", "core.jev_client", "core.questions", "core.providers",
-    "core.llm", "core.junshi", "core.laya_client",
+    "core.llm", "core.junshi", "core.laya_client", "core.runtime_local",
 ]
 datas, binaries = [], []
+# 全内置离线包：随包 Ollama 运行时 + 两个模型目录（tools/make_package.py 生成的）
+datas = _treedir(datas, "runtime")
+datas = _treedir(datas, "models")
+# docs/：程序图标（app/overlay.py 取 docs/icon.ico 当窗口图标）+ 公众号横幅等资源
+datas = _treedir(datas, "docs")
+# 军师知识库：core/junshi.py 按 _app_root()/goutoujunshi/SKILL.md 读，随包带上才用得上
+# （仓库在工程同级目录，不是这个仓库的一部分；没有就跳过，运行时退回内置精简版）
+_skill = os.path.join(_SPEC_ROOT, "..", "goutoujunshi", "SKILL.md")
+if os.path.isfile(_skill):
+    datas.append((os.path.abspath(_skill), "goutoujunshi"))
 for pkg in (
     "rapidocr_onnxruntime",
     "onnxruntime",

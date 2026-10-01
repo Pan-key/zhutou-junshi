@@ -3,7 +3,7 @@ rapidocr-onnxruntime>=1.4,<2  # offline Chinese OCR; 1.2.x rejects det_limit_* c
 numpy                         # frames are numpy arrays; chat-area detection is all numpy
 windows-capture               # Windows Graphics Capture, captures GPU-composited windows
 PySide6-Fluent-Widgets        # overlay UI (pulls in PySide6)
-pillow                        # only for the synthetic images in probe/
+pillow                        # OCR 预处理 + tools/make_icon.py 生成程序图标（PIL）
 
 # model SDKs: one official client per protocol, no hand-written HTTP (see core/llm.py)
 openai                        # OpenAI Chat Completions: DeepSeek, OpenRouter, Moonshot, GLM, Qwen, ...
@@ -11,7 +11,12 @@ typesafe-sdk                  # Jev judging over TypeSafe direct (api.typesafe.a
 anthropic                     # Anthropic Messages
 google-genai                  # Google Gemini
 
-winsdk                        # Windows.Media.Ocr: the ko/ja recognizers RapidOCR's zh/en models lack
+# 本地判断 Laya（全内置离线包必装；torch 用 CPU 版即可，装完约 1GB）
+laya
+torch
+transformers
+huggingface_hub
+safetensors
+tokenizers
 
-# optional, only for the two old UIA probes (already disproved; install to reproduce)
-# uiautomation                # probe_win.py / probe_win2.py
+winsdk                        # Windows.Media.Ocr: the ko/ja recognizers RapidOCR's zh/en models lack

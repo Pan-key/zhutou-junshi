@@ -9,6 +9,8 @@ SDK 都在函数里 import：桌面端一次只用到其中一家，启动时没
 """
 from __future__ import annotations
 
+import urllib.parse
+
 try:  # 当模块导入 / 当脚本直接跑 都能用
     from .jev_client import JevError, _fail
 except ImportError:
@@ -16,6 +18,35 @@ except ImportError:
 
 # Anthropic 开思考模式时的预算：起草三句话用不上更多；max_tokens 必须比它大，下面会兜住
 _THINK_BUDGET = 2048
+
+# 本机地址：随包 Ollama 就是 http://127.0.0.1:<port>/v1，自定义来源也常填 localhost
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+
+
+def _is_loopback(base_url: str | None) -> bool:
+    """base_url 是不是指向本机。解析不出来（空、畸形）一律当不是。"""
+    if not base_url:
+        return False
+    try:
+        host = urllib.parse.urlsplit(base_url).hostname
+    except ValueError:
+        return False
+    return (host or "").lower() in _LOOPBACK
+
+
+def _local_kwargs(base_url: str | None) -> dict:
+    """本机端点直连，绕开系统代理。
+
+    httpx 的 trust_env 会读 Windows 注册表里的 IE 代理（Clash / v2ray 之类），并且**不看**
+    系统代理自带的绕过名单（ProxyOverride=127.*;localhost），于是连 127.0.0.1 的请求也被
+    转发给代理，本机 Ollama 根本收不到话——报出来是代理那边的
+    「400 The plain HTTP request was sent to HTTPS port」。本机端点显式 trust_env=False。
+    """
+    if not _is_loopback(base_url):
+        return {}
+    import httpx
+
+    return {"http_client": httpx.Client(trust_env=False)}
 
 
 def _turns(user_turns: list[str], assistant: str = "assistant") -> list[dict]:
@@ -51,6 +82,7 @@ def _openai(base_url, api_key, model, system, user_turns, temperature, max_token
     try:
         client = openai.OpenAI(base_url=base_url or None, api_key=api_key,
                                timeout=timeout, max_retries=2,
+                               **_local_kwargs(base_url),
                                **({"default_headers": headers} if headers else {}))
         resp = client.chat.completions.create(
             model=model,
@@ -74,7 +106,8 @@ def _anthropic(base_url, api_key, model, system, user_turns, temperature, max_to
         max_tokens = max(max_tokens, _THINK_BUDGET + 1024)  # max_tokens 得装得下思考 + 正文
     try:
         client = anthropic.Anthropic(base_url=base_url or None, api_key=api_key,
-                                     timeout=timeout, max_retries=2)
+                                     timeout=timeout, max_retries=2,
+                                     **_local_kwargs(base_url))
         message = client.messages.create(model=model, system=system,
                                          messages=_turns(user_turns), max_tokens=max_tokens,
                                          temperature=temperature, **extra)
@@ -119,7 +152,8 @@ def list_models(protocol: str, base_url: str | None, api_key: str,
 
         try:
             client = anthropic.Anthropic(base_url=base_url or None, api_key=api_key,
-                                         timeout=timeout, max_retries=1)
+                                         timeout=timeout, max_retries=1,
+                                         **_local_kwargs(base_url))
             ids = [m.id for m in client.models.list()]
         except Exception as exc:
             _fail(exc, "取模型列表")
@@ -136,6 +170,7 @@ def list_models(protocol: str, base_url: str | None, api_key: str,
         try:
             client = openai.OpenAI(base_url=base_url or None, api_key=api_key,
                                    timeout=timeout, max_retries=1,
+                                   **_local_kwargs(base_url),
                                    **({"default_headers": headers} if headers else {}))
             ids = [m.id for m in client.models.list()]
         except Exception as exc:
@@ -204,6 +239,19 @@ if __name__ == "__main__":
         "x-opencode-session": "sid", "User-Agent": "jev-chat-windows"}
     chat("openai", "https://api.deepseek.com", "k", "m", "S", ["U"])
     assert "default_headers" not in seen["openai.init"]
+    # 本机端点（随包 Ollama）不走系统代理：显式 trust_env=False 的 http_client 必须传下去；
+    # 云端来源不受影响（不传 http_client，SDK 自己那套照旧）
+    chat("openai", "http://127.0.0.1:11434/v1", "k", "qwen2.5:7b", "S", ["U"])
+    assert seen["openai.init"]["http_client"].trust_env is False
+    assert seen["openai.init"]["base_url"] == "http://127.0.0.1:11434/v1"
+    chat("openai", "http://localhost:11435/v1", "k", "qwen2.5:7b", "S", ["U"])
+    assert seen["openai.init"]["http_client"].trust_env is False
+    chat("openai", "https://api.deepseek.com", "k", "m", "S", ["U"])
+    assert "http_client" not in seen["openai.init"]
+    assert _is_loopback("http://[::1]:11434/v1") and _is_loopback("http://127.0.0.1:1/v1")
+    assert not _is_loopback(None) and not _is_loopback("") and not _is_loopback("127.0.0.1:1")
+    assert not _is_loopback("https://api.deepseek.com")
+    assert not _is_loopback("https://localhost.evil.com/v1")  # 长得像但不是本机
     # 追问补齐：user / assistant / user 三轮
     chat("openai", "", "k", "m", "S", ["U1", "A1", "U2"])
     assert [m["role"] for m in seen["openai.call"]["messages"]] == [

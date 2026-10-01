@@ -16,3 +16,8 @@ wechat_probe.png
 build/
 dist/
 *.spec.bak
+
+# 全内置离线包的模型与运行时（几 GB 级，由 tools/make_package.py 生成，绝不进仓库）
+runtime/
+models/
+release_assets/

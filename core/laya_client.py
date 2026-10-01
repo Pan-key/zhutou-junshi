@@ -2,17 +2,20 @@
 """Laya 本地判断：替代 Jev（OpenRouter/TypeSafe）做意图判断和排序，完全离线、零 API 成本。
 
 模型：convaiinnovations/laya，multilingual checkpoint（唯一吃中文的）。
-权重 ~1.4GB，首次 predict 时从 HuggingFace 下载并缓存。
+随包带了快照就直接用本地目录加载（完全离线）；源码模式没带才从 HuggingFace 下载并缓存。
 接口形状和 jev_client.ask 完全一致：{"answers": {名字: 答案}, "usage": {...}}，
 engine 不关心跑的是云端 Jev 还是本地 Laya。
-
-参考 probe/probe_laya.py。
 """
 from __future__ import annotations
 
 import threading
 
-from .jev_client import JevError  # 复用异常类型
+try:  # 当模块导入 / 当脚本直接跑 都能用
+    from .jev_client import JevError  # 复用异常类型
+    from . import runtime_local
+except ImportError:
+    from jev_client import JevError
+    import runtime_local
 
 _agent = None
 _lock = threading.Lock()
@@ -31,8 +34,14 @@ def _load():
         except ImportError as e:
             raise JevError("未安装 laya 包：pip install laya") from e
         try:
-            # multilingual = 唯一吃中文的 checkpoint；typed-decisions 是英文做过题的
-            _agent = laya.load("convaiinnovations/laya", subfolder="multilingual")
+            # 全内置离线包：随包带了 multilingual 快照就用本地路径加载（零网络）；
+            # 源码模式没带快照才走 HuggingFace 下载。
+            bundled = runtime_local.laya_model_dir()
+            if bundled is not None:
+                _agent = laya.load(bundled)  # 本地目录（含 subfolder 结构），完全离线
+            else:
+                # multilingual = 唯一吃中文的 checkpoint；typed-decisions 是英文做过题的
+                _agent = laya.load("convaiinnovations/laya", subfolder="multilingual")
         except Exception as e:
             raise JevError(f"Laya 模型加载失败（首次需下载 ~1.4GB 权重）: {e}") from e
         return _agent

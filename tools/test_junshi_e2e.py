@@ -49,4 +49,4 @@ assert r["junshi"]["labels"] == ["稳健", "策略", "边界"]
 assert r["junshi"]["analysis"].startswith("对方在测试")
 # 候选不能带 label 前缀（要直接填进微信）
 assert not r["candidates"][0].startswith("稳健")
-print("\n端到端 junshi 链路测试通过 ✅")
+print("\n端到端 junshi 链路测试通过")

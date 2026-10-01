@@ -8,7 +8,7 @@ from math import isfinite
 from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizeGrip, QSizePolicy,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -43,6 +43,14 @@ def _mp_banner_path() -> str:
     """打包后在 _MEIPASS/docs，源码跑在仓库 docs/。"""
     root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(root, "docs", "wechat-mp.png")
+
+
+def _icon_path() -> str:
+    """程序图标（猪头军师那只猪）：打包后在 _MEIPASS/docs，源码跑在仓库 docs/。
+    找不到就返回空串——图标缺失不该拦住程序启动。"""
+    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(root, "docs", "icon.ico")
+    return path if os.path.isfile(path) else ""
 
 
 class _MpBanner(QLabel):
@@ -238,6 +246,9 @@ class Overlay:
         on_target_change(会话名, 人名) → 用户在群里挑了回复对象。
         on_toggle_debug(开不开) → 开关调试视图那个独立窗口。"""
         self.app = QApplication.instance() or QApplication([])
+        icon = _icon_path()  # 悬浮窗/设置页/任务栏都用它，而不是 python.exe 或 Qt 的默认图标
+        if icon:
+            self.app.setWindowIcon(QIcon(icon))
         setTheme(Theme.LIGHT)
         setThemeColor(_GREEN, save=False)
         self.on_fill = on_fill
@@ -296,24 +307,6 @@ class Overlay:
         title.addWidget(_tool(FIF.REMOVE, "最小化", self.win.showMinimized, header))
         title.addWidget(_tool(FIF.CLOSE, "关闭助手", self.win.close, header))
         outer.addWidget(header)
-        self.updateBar = QWidget(self.win)
-        update_row = QHBoxLayout(self.updateBar)
-        update_row.setContentsMargins(18, 4, 8, 4)
-        update_row.setSpacing(8)
-        self.updateLabel = _label("", 12, _GREEN, True)
-        update_row.addWidget(self.updateLabel, 1)
-        self.updateLink = bind(HyperlinkButton("", "", self.updateBar), "去下载")
-        self.updateLink.setFixedHeight(24)
-        update_row.addWidget(self.updateLink)
-        closeUpdate = TransparentToolButton(FIF.CLOSE, self.updateBar)
-        closeUpdate.setFixedSize(20, 20)
-        bind(closeUpdate, "关闭更新提示", "setToolTip")
-        bind(closeUpdate, "关闭更新提示", "setAccessibleName")
-        closeUpdate.clicked.connect(lambda: self.updateBar.hide())
-        update_row.addWidget(closeUpdate)
-        self.updateBar.setFixedHeight(32)
-        self.updateBar.hide()
-        outer.addWidget(self.updateBar)
         self.pages = QStackedWidget(self.win)
         outer.addWidget(self.pages, 1)
         self._build_home()
@@ -576,17 +569,6 @@ class Overlay:
         box.addWidget(self._hint(
             "开了以后群聊里可以选回复给谁，候选会针对 TA 写，填入时可带 @。关了就正常回复。"
         ))
-        update_row = QHBoxLayout()
-        update_row.addWidget(_tlabel("启动时检查更新", 13), 1)
-        self.updateSwitch = SwitchButton()
-        bind(self.updateSwitch, "开", "setOnText")
-        bind(self.updateSwitch, "关", "setOffText")
-        bind(self.updateSwitch, "启动时检查更新", "setAccessibleName")
-        update_row.addWidget(self.updateSwitch)
-        box.addLayout(update_row)
-        box.addWidget(self._hint(
-            "只向 GitHub 查最新版本号，不发送任何数据。国内访问 GitHub 慢的话关掉也行。"
-        ))
         debug_row = QHBoxLayout()
         debug_row.addWidget(_tlabel("调试视图", 13), 1)
         self.debugSwitch = SwitchButton()
@@ -609,14 +591,27 @@ class Overlay:
         box.addWidget(_tlabel("模型", 16, "#7a3a55", True))
         self._fetched = _Fetched()
         self._fetched.done.connect(self._models_fetched)
-        self.jev = self._model_group(box, "判断 · Jev", "jev", providers.JEV_PROVIDERS)
+        self.jev = self._model_group(box, "判断", "jev", providers.JEV_PROVIDERS)
         box.addWidget(self._hint(
-            "判断意图、紧张度，并给三条候选排序。两家给的是同一个 Jev，必填。"
+            "判断意图、紧张度，并给三条候选排序。默认本地 Laya（随程序内置，离线免费）；"
+            "也可以换 OpenRouter / TypeSafe 的 Jev。"
         ))
         self.draft = self._model_group(box, "起草 · 语言模型", "draft", providers.DRAFT_PROVIDERS)
         box.addWidget(self._hint(
-            "写那三条候选。OpenAI / Anthropic / Gemini 三种接口都走各自官方 SDK。"
-            "默认 DeepSeek 官网直连，国内最快。"
+            "写那三条候选。默认本地 Ollama（随程序内置 qwen2.5:7b，无需密钥）；"
+            "也可以换云端 OpenAI / Anthropic / Gemini 来源。"
+        ))
+        junshi_row = QHBoxLayout()
+        junshi_row.addWidget(_tlabel("军师模式", 13), 1)
+        self.junshiSwitch = SwitchButton()
+        bind(self.junshiSwitch, "开", "setOnText")
+        bind(self.junshiSwitch, "关", "setOffText")
+        bind(self.junshiSwitch, "军师模式", "setAccessibleName")
+        junshi_row.addWidget(self.junshiSwitch)
+        box.addLayout(junshi_row)
+        box.addWidget(self._hint(
+            "狗头军师：判断之后先按军师方法论推演利弊，三条候选变成「稳健 / 策略 / 边界」"
+            "三个方向，而不是同一口吻的三句话。慢一点，本地模型下更明显。"
         ))
         think_row = QHBoxLayout()
         think_row.addWidget(_tlabel("起草时开启思考模式", 13), 1)
@@ -731,10 +726,16 @@ class Overlay:
         for group in (self.jev, self.draft):
             provider = self._provider_of(group)
             name = group.table[provider].name
-            configured = bool(group.stored_key())
-            bind(group.keyState, "已配置" if configured else "未配置")
-            bind(group.keyEdit, "已配置，留空保留" if configured else
-                 lambda name=name: T("输入 {name} API 密钥").format(name=name), "setPlaceholderText")
+            local = ((group.kind == "jev" and provider == "local")
+                     or (group.kind == "draft" and provider == "ollama"))
+            if local:  # 全内置本地来源：不需要 key，显示就绪而不是未配置
+                bind(group.keyState, "本地模型，无需密钥")
+                bind(group.keyEdit, "本地模型无需密钥", "setPlaceholderText")
+            else:
+                configured = bool(group.stored_key())
+                bind(group.keyState, "已配置" if configured else "未配置")
+                bind(group.keyEdit, "已配置，留空保留" if configured else
+                     lambda name=name: T("输入 {name} API 密钥").format(name=name), "setPlaceholderText")
             if self._compact:
                 name = group.providerBox.fontMetrics().elidedText(name, Qt.ElideRight, 180)
             group.providerBox.setText(name)
@@ -745,9 +746,14 @@ class Overlay:
     def _fetch_models(self, group):
         """「获取模型」：拿填的 key（没填就拿存的）去问接口，网络调用丢后台线程。"""
         provider = self._provider_of(group)
+        if group.kind == "jev" and provider == "local":
+            bind(group.status, "本地模型，无需获取", "setText")
+            return
         custom = group.kind == "draft" and provider in providers.CUSTOM
         base = self.baseEdit.text().strip() if custom else None
         key = group.keyEdit.text().strip() or group.stored_key()
+        if group.kind == "draft" and provider == "ollama":
+            key = key or "ollama"  # 内置本地 Ollama 不验证 key，给个占位
         if not key:
             bind(group.status, "先填密钥", "setText")
             return
@@ -766,7 +772,8 @@ class Overlay:
                 models = jev_client.list_models(provider, key)
             else:
                 spec = providers.DRAFT_PROVIDERS[provider]
-                models = llm.list_models(spec.protocol, base or spec.base, key, headers=spec.headers)
+                models = llm.list_models(spec.protocol, providers.draft_base(provider, base),
+                                         key, headers=spec.headers)
                 if spec.keep:  # 目录里混了别的协议时，只留这条路打得通的
                     models = [m for m in models if spec.keep(m)]
             reason = "" if models else "这个来源没返回任何模型"
@@ -847,7 +854,7 @@ class Overlay:
         self._set_group(self.draft, settings.draft_provider(), settings.draft_model())
         self.baseEdit.setText(settings.draft_base_url())
         self.thinkingSwitch.setChecked(settings.thinking())
-        self.updateSwitch.setChecked(settings.check_update())
+        self.junshiSwitch.setChecked(settings.junshi())
         self.set_debug_switch(settings.debug_view())  # 屏蔽信号地拨，别在加载时开关一遍窗口
         self._sync_model_fields()  # 上面屏蔽了信号，这里补一次
         self.settingsFeedback.hide()
@@ -868,7 +875,9 @@ class Overlay:
             return
         for group, provider in ((self.jev, jev_provider), (self.draft, draft_provider)):
             name = group.table[provider].name
-            if not group.keyEdit.text().strip() and not group.stored_key():
+            local = ((group.kind == "jev" and provider == "local")
+                     or (group.kind == "draft" and provider == "ollama"))
+            if not local and not group.keyEdit.text().strip() and not group.stored_key():
                 self._settings_feedback(lambda group=group:
                                         T("请先填写 {name} 的 API 密钥。").format(name=T(group.keyTitle)), error=True)
                 group.keyEdit.setFocus()
@@ -889,7 +898,7 @@ class Overlay:
                           reply_target_on=self.targetSwitch.isChecked(),
                           style_text=self.styleEdit.text().strip(),
                           thinking_on=self.thinkingSwitch.isChecked(),
-                          check_update_on=self.updateSwitch.isChecked())
+                          junshi_on=self.junshiSwitch.isChecked())
         except Exception:
             self._settings_feedback("保存失败，请检查配置文件是否可写后重试。", error=True)
             return
@@ -959,12 +968,6 @@ class Overlay:
         self._capture_text(on)
         if self.on_toggle_capture:
             self.on_toggle_capture(on)
-
-    def set_update(self, latest, url):
-        """main.py 后台线程查到比当前新的版本才会调这个。只显示版本号和 Release 链接，别的什么都没有。"""
-        bind(self.updateLabel, lambda: T("有新版本 v{version}").format(version=latest))
-        self.updateLink.setUrl(url)
-        self.updateBar.show()
 
     def set_capture(self, on, reason=""):
         """父进程回报的状态：只改界面，不回调（不然和父进程来回打架）。reason 为空用默认说明。"""

@@ -19,8 +19,8 @@ _ROOT = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
 _CONFIG = os.path.join(_ROOT, "config.json")
 _DEFAULT_RELATIONSHIP = "romantic partners"
 _DEFAULT_CONTEXT = 10
-_DEFAULT_JEV = "openrouter"
-_DEFAULT_DRAFT = "deepseek"
+_DEFAULT_JEV = "local"      # 判断默认走本地 Laya（全内置离线）
+_DEFAULT_DRAFT = "ollama"   # 起草默认走本地 Ollama（随程序内置 qwen2.5:7b）
 
 
 def _read(name: str, default=None):
@@ -88,10 +88,6 @@ def junshi() -> bool:
     """狗头军师模式：开了之后 Jev 判断利弊，按军师方法论出稳健/策略/边界三版回复。默认关。"""
     return bool(_read("junshi", False))
 
-def check_update() -> bool:
-    """启动时要不要去 GitHub 查一次最新版本号：默认开，只出这一次网，设置里能关。"""
-    return bool(_read("check_update", True))
-
 def debug_view() -> bool:
     """调试视图：另开一个窗口实时画识别框。默认关，开了子进程才往队列里送帧。"""
     return bool(_read("debug_view", False))
@@ -153,6 +149,9 @@ def llm_key() -> str:
     return _get_key(LLM_ENV)
 
 def has_llm_key() -> bool:
+    if draft_provider() == "ollama":
+        os.environ.setdefault("LLM_API_KEY", "ollama")  # 内置本地 Ollama 不验证 key
+        return True
     if draft_provider() == "custom_openai" and "localhost" in (draft_base_url() or ""):
         os.environ.setdefault("LLM_API_KEY", "ollama")  # 本地 Ollama 不验证 key，给个占位
         return True
@@ -166,7 +165,7 @@ def save(relationship_text: str | None = None, context_n: int | None = None, *,
          llm_key_text: str | None = None, draft_model_text: str | None = None,
          draft_base_url_text: str | None = None, reply_target_on: bool | None = None,
          style_text: str | None = None, thinking_on: bool | None = None,
-         check_update_on: bool | None = None, debug_view_on: bool | None = None,
+         debug_view_on: bool | None = None,
          junshi_on: bool | None = None, lang_text: str | None = None) -> None:
     """每个参数为空/None = 保留当前值。两把 key 写进程环境 + HKCU\\Environment，不写任何文件。"""
     jev = jev_provider_text if jev_provider_text in JEV_PROVIDERS else jev_provider()
@@ -195,7 +194,6 @@ def save(relationship_text: str | None = None, context_n: int | None = None, *,
         "draft_base_url": keep(draft_base_url_text, "draft_base_url"),
         "reply_target": flag(reply_target_on, reply_target),
         "thinking": flag(thinking_on, thinking),
-        "check_update": flag(check_update_on, check_update),
         "debug_view": flag(debug_view_on, debug_view),
         "junshi": flag(junshi_on, junshi),
     }

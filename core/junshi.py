@@ -21,15 +21,26 @@ try:
     from .draft import _clean, _sanitize, _suspects, _her_recent, _line
     from .jev_client import JevError, _api_key
     from .llm import chat
-    from .providers import DRAFT_PROVIDERS, LLM_ENV
+    from .providers import DRAFT_PROVIDERS, LLM_ENV, draft_base
+    from . import runtime_local
 except ImportError:  # 当脚本直接跑
     from draft import _clean, _sanitize, _suspects, _her_recent, _line
     from jev_client import JevError, _api_key
     from llm import chat
-    from providers import DRAFT_PROVIDERS, LLM_ENV
+    from providers import DRAFT_PROVIDERS, LLM_ENV, draft_base
+    import runtime_local
 
-# goutoujunshi 仓库：core/junshi.py → ../../goutoujunshi
-_JUNSHI_DIR = Path(__file__).resolve().parent.parent.parent / "goutoujunshi"
+# 军师知识库（SKILL.md）的两个可能位置，优先级从高到低：
+#   1) 随包目录（打包后 = _internal/goutoujunshi，由 zhutoujunshi.spec 打进去）
+#   2) 源码仓库旁边的 ../goutoujunshi（core/junshi.py → 上三级）
+def _skill_file() -> Path | None:
+    """SKILL.md 到底在哪；两处都没有就返回 None（调用方退回内置精简版）。"""
+    for d in (Path(runtime_local.app_root()) / "goutoujunshi",
+              Path(__file__).resolve().parent.parent.parent / "goutoujunshi"):
+        f = d / "SKILL.md"
+        if f.is_file():
+            return f
+    return None
 
 
 def _load_skill_excerpt() -> str:
@@ -42,8 +53,10 @@ def _load_skill_excerpt() -> str:
         "保持温暖、清醒、站在 me 一边；给判断但不读心，用真实行为代替标签。\n"
         "危险情境（暴力、胁迫、诈骗、自伤）先保安全，不用普通话术处理。"
     )
+    sk = _skill_file()
+    if sk is None:
+        return fallback
     try:
-        sk = _JUNSHI_DIR / "SKILL.md"
         text = sk.read_text(encoding="utf-8")
         m = re.search(r"## 核心原则(.*?)(?=\n## )", text, re.S)
         block = m.group(1).strip() if m else ""
@@ -154,7 +167,10 @@ def _parse_junshi(content: str) -> tuple[list[str], dict]:
         meta["labels"] = lm[:len(cands)]
         return cands[:3], meta
     # 最终兜底：用 jev 原生的数组解析
-    from .draft import _parse_candidates
+    try:  # 当模块导入 / 当脚本直接跑 都能用
+        from .draft import _parse_candidates
+    except ImportError:
+        from draft import _parse_candidates
     try:
         cands = _parse_candidates(content)
         return cands, meta
@@ -171,6 +187,7 @@ def draft_junshi(messages: list, relationship: str, provider: str = "deepseek",
     meta = {"analysis","risk","labels":[稳健,策略,边界]}。
     candidates 经过和 jev 原生一样的注入/复读过滤，可直接交给 fill 填入输入框。"""
     spec = DRAFT_PROVIDERS[provider]
+    base = draft_base(provider, base_url)  # 本地 Ollama 的真实端口由运行时决定
     skill = _load_skill_excerpt()
     system = SYSTEM_TEMPLATE.format(skill=skill)
     user = _build_user(messages, relationship, keep, reply_to, style, guidance)
@@ -181,7 +198,7 @@ def draft_junshi(messages: list, relationship: str, provider: str = "deepseek",
         key = "ollama-local"
     # 军师要输出 JSON 对象（含 analysis），max_tokens 给宽一点；温度略低于原生 1.2，
     # 因为有结构约束，太飘会吐坏 JSON。
-    content = chat(spec.protocol, base_url or spec.base, key, model or spec.default,
+    content = chat(spec.protocol, base, key, model or spec.default,
                    system, [user], temperature=0.9, max_tokens=1200,
                    thinking=False, extra_body=spec.extra(False),
                    headers=spec.headers, timeout=timeout)
